@@ -76,10 +76,5 @@
         "@openzeppelin/contracts": "4.9.2",
         "@openzeppelin/contracts-upgradeable": "4.9.2",
         "@openzeppelin/hardhat-upgrades": "^2.0.1"
-    },
-    "husky": {
-        "hooks": {
-            "pre-commit": "npm run lint"
-        }
     }
 }
