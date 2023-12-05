@@ -62,11 +62,11 @@ contract TokenVesting is TokenVestingBase, Initializable {
 
         // Create protocol schedule
         createVestingSchedule(
-            "Protocol",
+            "Protocol Rewards",
             protocolBeneficiary,
             START,
-            24 * MONTH,
             12 * MONTH,
+            24 * MONTH,
             MONTH,
             true,
             PROTOCOL_AMOUNT
@@ -77,8 +77,8 @@ contract TokenVesting is TokenVestingBase, Initializable {
             "Team",
             teamBeneficiary,
             START,
-            24 * MONTH,
             6 * MONTH,
+            24 * MONTH,
             MONTH,
             true,
             TEAM_AMOUNT

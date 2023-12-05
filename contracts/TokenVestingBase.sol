@@ -7,6 +7,7 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import "./Errors.sol";
 
 /**
@@ -14,6 +15,7 @@ import "./Errors.sol";
  */
 contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using Address for address payable;
 
     struct VestingSchedule {
         // name of the vesting schedule
@@ -61,6 +63,15 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
     event VestingScheduleRevoked(
         bytes32 indexed vestingScheduleId,
         address indexed owner
+    );
+
+    event Withdrawal(address indexed owner, uint256 amount);
+
+    event Released(
+        bytes32 indexed vestingScheduleId,
+        address indexed beneficiary,
+        uint256 amount,
+        address caller
     );
 
     /**
@@ -176,6 +187,8 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         if (getWithdrawableAmount() < amount) revert NotEnoughFunds();
 
         _token.safeTransfer(msg.sender, amount);
+
+        emit Withdrawal(msg.sender, amount);
     }
 
     /**
@@ -204,6 +217,30 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         );
         vestingSchedulesTotalAmount = vestingSchedulesTotalAmount - amount;
         _token.safeTransfer(beneficiaryPayable, amount);
+
+        emit Released(
+            vestingScheduleId,
+            vestingSchedule.beneficiary,
+            amount,
+            msg.sender
+        );
+    }
+
+    /**
+     * @notice Withdraw mistaken transfered token
+     * @param token address of the token to withdraw
+     * @param amount amount of the token to withdraw
+     */
+    function withdrawMistakenTransferedToken(
+        address token,
+        uint256 amount
+    ) external nonReentrant onlyOwner {
+        require(token != address(_token));
+        if (token == address(0)) {
+            payable(msg.sender).sendValue(amount);
+        } else {
+            IERC20(token).safeTransfer(msg.sender, amount);
+        }
     }
 
     /**
