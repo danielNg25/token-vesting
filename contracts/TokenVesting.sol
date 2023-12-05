@@ -30,7 +30,7 @@ contract TokenVesting is TokenVestingBase, Initializable {
             liquidityBeneficiary,
             START,
             0,
-            3 * MONTH,
+            3,
             MONTH,
             true,
             LIQUIDITY_AMOUNT
@@ -42,7 +42,7 @@ contract TokenVesting is TokenVestingBase, Initializable {
             coreContributorsBeneficiary,
             START,
             6 * MONTH,
-            12 * MONTH,
+            12,
             MONTH,
             true,
             CORE_CONTRIBUTORS_AMOUNT
@@ -54,7 +54,7 @@ contract TokenVesting is TokenVestingBase, Initializable {
             treasuryBeneficiary,
             START,
             6 * MONTH,
-            12 * MONTH,
+            12,
             MONTH,
             true,
             TREASURY_AMOUNT
@@ -66,7 +66,7 @@ contract TokenVesting is TokenVestingBase, Initializable {
             protocolBeneficiary,
             START,
             12 * MONTH,
-            24 * MONTH,
+            24,
             MONTH,
             true,
             PROTOCOL_AMOUNT
@@ -78,7 +78,7 @@ contract TokenVesting is TokenVestingBase, Initializable {
             teamBeneficiary,
             START,
             6 * MONTH,
-            24 * MONTH,
+            24,
             MONTH,
             true,
             TEAM_AMOUNT

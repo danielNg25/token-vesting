@@ -8,17 +8,14 @@ error ScheduleRevoked();
 // cannot create vesting schedule because not sufficient tokens
 error InsufficientToken();
 
-// duration must be > 0
-error DurationGtZero();
+// number of slice must be > 0
+error NumberOfSliceGtZero();
 
-// duration must be > 0
+// amount must be > 0
 error AmountGtZero();
 
 // slice period second must be > 0
 error SlicePeriodSecondsGtZero();
-
-// duration must be >= cliff
-error DurationGteCliff();
 
 // vesting not revocable
 error VestingNotRevocable();

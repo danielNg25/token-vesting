@@ -26,8 +26,8 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         uint256 cliff;
         // start time of the vesting period in seconds since the UNIX epoch
         uint256 start;
-        // duration of the vesting period in seconds
-        uint256 duration;
+        // number of the vesting period slice
+        uint256 numberOfSlice;
         // duration of a slice period for the vesting in seconds
         uint256 slicePeriodSeconds;
         // whether or not the vesting is revocable
@@ -54,7 +54,7 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         address indexed beneficiary,
         uint256 cliff,
         uint256 start,
-        uint256 duration,
+        uint256 numberOfSlice,
         uint256 slicePeriodSeconds,
         bool revocable,
         uint256 amountTotal
@@ -99,7 +99,7 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
      * @param _beneficiary address of the beneficiary to whom vested tokens are transferred
      * @param _start start time of the vesting period
      * @param _cliff duration in seconds of the cliff in which tokens will begin to vest
-     * @param _duration duration in seconds of the period in which the tokens will vest
+     * @param _numberOfSlice number of the period slice in which the tokens will vest
      * @param _slicePeriodSeconds duration of a slice period for the vesting in seconds
      * @param _revocable whether the vesting is revocable or not
      * @param _amount total amount of tokens to be released at the end of the vesting
@@ -109,16 +109,15 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         address _beneficiary,
         uint256 _start,
         uint256 _cliff,
-        uint256 _duration,
+        uint256 _numberOfSlice,
         uint256 _slicePeriodSeconds,
         bool _revocable,
         uint256 _amount
     ) public onlyOwner {
         if (getWithdrawableAmount() < _amount) revert InsufficientToken();
-        if (_duration == 0) revert DurationGtZero();
+        if (_numberOfSlice == 0) revert NumberOfSliceGtZero();
         if (_amount == 0) revert AmountGtZero();
         if (_slicePeriodSeconds == 0) revert SlicePeriodSecondsGtZero();
-        if (_duration < _cliff) revert DurationGteCliff();
 
         bytes32 vestingScheduleId = computeNextVestingScheduleIdForHolder(
             _beneficiary
@@ -129,7 +128,7 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
             _beneficiary,
             cliff,
             _start,
-            _duration,
+            _numberOfSlice,
             _slicePeriodSeconds,
             _revocable,
             _amount,
@@ -147,7 +146,7 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
             _beneficiary,
             cliff,
             _start,
-            _duration,
+            _numberOfSlice,
             _slicePeriodSeconds,
             _revocable,
             _amount
@@ -209,7 +208,7 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         if (!isBeneficiary && !isReleasor) revert OnlyBeneficiaryAndOwner();
 
         uint256 vestedAmount = _computeReleasableAmount(vestingSchedule);
-        if (vestedAmount < amount) revert NotEnoughFunds();
+        if (vestedAmount < amount || amount == 0) revert NotEnoughFunds();
 
         vestingSchedule.released = vestingSchedule.released + amount;
         address payable beneficiaryPayable = payable(
@@ -236,11 +235,8 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         uint256 amount
     ) external nonReentrant onlyOwner {
         require(token != address(_token));
-        if (token == address(0)) {
-            payable(msg.sender).sendValue(amount);
-        } else {
-            IERC20(token).safeTransfer(msg.sender, amount);
-        }
+
+        IERC20(token).safeTransfer(msg.sender, amount);
     }
 
     /**
@@ -392,20 +388,22 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
         // If the current time is after the vesting period, all tokens are releasable,
         // minus the amount already released.
         else if (
-            currentTime >= vestingSchedule.start + vestingSchedule.duration
+            currentTime >=
+            vestingSchedule.cliff +
+                (vestingSchedule.numberOfSlice - 1) *
+                vestingSchedule.slicePeriodSeconds
         ) {
             return vestingSchedule.amountTotal - vestingSchedule.released;
         }
         // Otherwise, some tokens are releasable.
         else {
             // Compute the number of full vesting periods that have elapsed.
-            uint256 timeFromStart = currentTime - vestingSchedule.start;
+            uint256 timeFromStart = currentTime - vestingSchedule.cliff;
             uint256 secondsPerSlice = vestingSchedule.slicePeriodSeconds;
-            uint256 vestedSlicePeriods = timeFromStart / secondsPerSlice;
-            uint256 vestedSeconds = vestedSlicePeriods * secondsPerSlice;
+            uint256 vestedSlice = timeFromStart / secondsPerSlice + 1;
             // Compute the amount of tokens that are vested.
-            uint256 vestedAmount = (vestingSchedule.amountTotal *
-                vestedSeconds) / vestingSchedule.duration;
+            uint256 vestedAmount = (vestingSchedule.amountTotal * vestedSlice) /
+                vestingSchedule.numberOfSlice;
             // Subtract the amount already released and return.
             return vestedAmount - vestingSchedule.released;
         }
@@ -418,15 +416,4 @@ contract TokenVestingBase is Ownable2Step, ReentrancyGuard {
     function getCurrentTime() internal view virtual returns (uint256) {
         return block.timestamp;
     }
-
-    /**
-     * @dev This function is called for plain Ether transfers, i.e. for every call with empty calldata.
-     */
-    receive() external payable {}
-
-    /**
-     * @dev Fallback function is executed if none of the other functions match the function
-     * identifier or no data was provided with the function call.
-     */
-    fallback() external payable {}
 }
