@@ -269,6 +269,380 @@ describe("Greater", () => {
         });
     });
 
+    describe("Vesting ", () => {
+        beforeEach(async () => {
+            await token.transfer(
+                await tokenVesting.getAddress(),
+                parseEther(CONFIG.VESTING_AMOUNT.toString()),
+            );
+
+            await tokenVesting
+                .connect(owner)
+                .initialize(
+                    liquidityBeneficiary.address,
+                    coreContributorsBeneficiary.address,
+                    treasuryBeneficiary.address,
+                    protocolRewardsBeneficiary.address,
+                    teamBeneficiary.address,
+                );
+        });
+
+        it("Should release failed - before start", async () => {
+            await expect(
+                tokenVesting
+                    .connect(liquidityBeneficiary)
+                    .release(await tokenVesting.getVestingIdAtIndex(0), 1),
+            ).to.be.revertedWithCustomError(tokenVesting, "NotEnoughFunds");
+
+            await expect(
+                tokenVesting
+                    .connect(owner)
+                    .release(await tokenVesting.getVestingIdAtIndex(0), 1),
+            ).to.be.revertedWithCustomError(tokenVesting, "NotEnoughFunds");
+        });
+
+        it("Should revoke failed - not owner", async () => {
+            await expect(
+                tokenVesting
+                    .connect(user)
+                    .revoke(await tokenVesting.getVestingIdAtIndex(0)),
+            ).to.be.revertedWith("Ownable: caller is not the owner");
+        });
+
+        it("Should revoke successfully before start", async () => {
+            await tokenVesting
+                .connect(owner)
+                .revoke(await tokenVesting.getVestingIdAtIndex(0));
+
+            const liquiditySchedule = await tokenVesting.getVestingSchedule(
+                await tokenVesting.getVestingIdAtIndex(0),
+            );
+            expect(liquiditySchedule.revoked).to.equal(true);
+
+            const freeAmount = parseEther(CONFIG.LIQUIDITY.AMOUNT.toString());
+            expect(await tokenVesting.getWithdrawableAmount()).to.equal(
+                freeAmount,
+            );
+
+            // withdraw failed - not owner
+            await expect(
+                tokenVesting.connect(user).withdraw(freeAmount),
+            ).to.be.revertedWith("Ownable: caller is not the owner");
+
+            // withdraw failed - not enough balance
+            await expect(
+                tokenVesting.connect(owner).withdraw(freeAmount + 1n),
+            ).to.be.revertedWithCustomError(tokenVesting, "NotEnoughFunds");
+
+            // withdraw
+            await expect(() =>
+                tokenVesting.withdraw(freeAmount),
+            ).to.changeTokenBalances(
+                token,
+                [owner, tokenVesting],
+                [freeAmount, freeAmount * -1n],
+            );
+        });
+
+        it("Should release successfully - no cliff", async () => {
+            // Release at start time: 1 slice
+            await time.increaseTo(CONFIG.START_TIME);
+            const liquidityScheduleId = await tokenVesting.getVestingIdAtIndex(
+                0,
+            );
+
+            const releaseAmount = parseEther(
+                (CONFIG.LIQUIDITY.AMOUNT / CONFIG.LIQUIDITY.SLICES).toString(),
+            );
+            expect(
+                await tokenVesting.computeReleasableAmount(liquidityScheduleId),
+            ).to.equal(releaseAmount);
+
+            // Failed - not beneficiary or owner
+            await expect(
+                tokenVesting.connect(user).release(
+                    liquidityScheduleId, // Liquidity
+                    releaseAmount,
+                ),
+            ).to.revertedWithCustomError(
+                tokenVesting,
+                "OnlyBeneficiaryAndOwner",
+            );
+
+            // Failed - amount = 0
+            await expect(
+                tokenVesting.connect(liquidityBeneficiary).release(
+                    liquidityScheduleId, // Liquidity
+                    0,
+                ),
+            ).to.revertedWithCustomError(tokenVesting, "NotEnoughFunds");
+
+            await expect(() =>
+                tokenVesting.connect(liquidityBeneficiary).release(
+                    liquidityScheduleId, // Liquidity
+                    releaseAmount,
+                ),
+            ).to.changeTokenBalances(
+                token,
+                [liquidityBeneficiary, tokenVesting],
+                [releaseAmount, releaseAmount * -1n],
+            );
+            let liquiditySchedule = await tokenVesting.getVestingSchedule(
+                liquidityScheduleId,
+            );
+            expect(liquiditySchedule.released).to.equal(releaseAmount);
+
+            // Release at the second month
+            await time.increaseTo(CONFIG.START_TIME + CONFIG.MONTH);
+            expect(
+                await tokenVesting.computeReleasableAmount(liquidityScheduleId),
+            ).to.equal(releaseAmount);
+            // Release by owner
+            await expect(() =>
+                tokenVesting.connect(owner).release(
+                    liquidityScheduleId, // Liquidity
+                    releaseAmount,
+                ),
+            ).to.changeTokenBalances(
+                token,
+                [liquidityBeneficiary, tokenVesting],
+                [releaseAmount, releaseAmount * -1n],
+            );
+            liquiditySchedule = await tokenVesting.getVestingSchedule(
+                liquidityScheduleId,
+            );
+            expect(liquiditySchedule.released).to.equal(releaseAmount * 2n);
+
+            // Release at the last month
+            await time.increaseTo(CONFIG.START_TIME + 2 * CONFIG.MONTH);
+            expect(
+                await tokenVesting.computeReleasableAmount(liquidityScheduleId),
+            ).to.equal(releaseAmount);
+            await expect(() =>
+                tokenVesting.connect(liquidityBeneficiary).release(
+                    liquidityScheduleId, // Liquidity
+                    releaseAmount,
+                ),
+            ).to.changeTokenBalances(
+                token,
+                [liquidityBeneficiary, tokenVesting],
+                [releaseAmount, releaseAmount * -1n],
+            );
+            liquiditySchedule = await tokenVesting.getVestingSchedule(
+                liquidityScheduleId,
+            );
+            expect(liquiditySchedule.released).to.equal(
+                parseEther(CONFIG.LIQUIDITY.AMOUNT.toString()),
+            );
+
+            // Release after the last month
+            await time.increaseTo(CONFIG.START_TIME + 4 * CONFIG.MONTH);
+            expect(
+                await tokenVesting.computeReleasableAmount(liquidityScheduleId),
+            ).to.equal(0);
+        });
+
+        it("Should release failed - after start but before cliff", async () => {
+            await time.increaseTo(CONFIG.START_TIME + CONFIG.MONTH * 5);
+
+            await expect(
+                tokenVesting
+                    .connect(treasuryBeneficiary)
+                    .release(await tokenVesting.getVestingIdAtIndex(2), 1), // Treasury
+            ).to.be.revertedWithCustomError(tokenVesting, "NotEnoughFunds");
+
+            await expect(
+                tokenVesting
+                    .connect(owner)
+                    .release(await tokenVesting.getVestingIdAtIndex(2), 1), // Treasury
+            ).to.be.revertedWithCustomError(tokenVesting, "NotEnoughFunds");
+        });
+
+        it("Should revoke successfully before cliff", async () => {
+            const treasuryScheduleId = await tokenVesting.getVestingIdAtIndex(
+                2,
+            );
+
+            await tokenVesting.connect(owner).revoke(treasuryScheduleId); // Treasury
+
+            const treasurySchedule = await tokenVesting.getVestingSchedule(
+                treasuryScheduleId,
+            );
+            expect(treasurySchedule.revoked).to.equal(true);
+
+            const freeAmount = parseEther(CONFIG.TREASURY.AMOUNT.toString());
+            expect(await tokenVesting.getWithdrawableAmount()).to.equal(
+                freeAmount,
+            );
+
+            // withdraw failed - not owner
+            await expect(
+                tokenVesting.connect(user).withdraw(freeAmount),
+            ).to.be.revertedWith("Ownable: caller is not the owner");
+
+            // withdraw failed - not enough balance
+            await expect(
+                tokenVesting.connect(owner).withdraw(freeAmount + 1n),
+            ).to.be.revertedWithCustomError(tokenVesting, "NotEnoughFunds");
+
+            // withdraw
+            await expect(() =>
+                tokenVesting.withdraw(freeAmount),
+            ).to.changeTokenBalances(
+                token,
+                [owner, tokenVesting],
+                [freeAmount, freeAmount * -1n],
+            );
+        });
+
+        it("Should release successfully - cliff", async () => {
+            // Release at start time: 1 slice
+            await time.increaseTo(CONFIG.START_TIME + CONFIG.MONTH * 6);
+            const contributorScheduleId =
+                await tokenVesting.getVestingIdAtIndex(1);
+
+            let releaseAmount = parseEther(
+                (
+                    CONFIG.CORE_CONTRIBUTOR.AMOUNT /
+                    CONFIG.CORE_CONTRIBUTOR.SLICES
+                ).toString(),
+            );
+            expect(
+                await tokenVesting.computeReleasableAmount(
+                    contributorScheduleId,
+                ),
+            ).to.equal(releaseAmount);
+
+            await expect(() =>
+                tokenVesting.connect(coreContributorsBeneficiary).release(
+                    contributorScheduleId, // Contributor
+                    releaseAmount,
+                ),
+            ).to.changeTokenBalances(
+                token,
+                [coreContributorsBeneficiary, tokenVesting],
+                [releaseAmount, releaseAmount * -1n],
+            );
+            let contributorSchedule = await tokenVesting.getVestingSchedule(
+                contributorScheduleId,
+            );
+            expect(contributorSchedule.released).to.equal(releaseAmount);
+
+            // Release at the third month
+            await time.increaseTo(CONFIG.START_TIME + CONFIG.MONTH * 8);
+            releaseAmount = parseEther(
+                (
+                    (CONFIG.CORE_CONTRIBUTOR.AMOUNT /
+                        CONFIG.CORE_CONTRIBUTOR.SLICES) *
+                    2
+                ).toString(),
+            );
+            expect(
+                await tokenVesting.computeReleasableAmount(
+                    contributorScheduleId,
+                ),
+            ).to.equal(releaseAmount);
+            // Release by owner
+            await expect(() =>
+                tokenVesting.connect(owner).release(
+                    contributorScheduleId, // Liquidity
+                    releaseAmount,
+                ),
+            ).to.changeTokenBalances(
+                token,
+                [coreContributorsBeneficiary, tokenVesting],
+                [releaseAmount, releaseAmount * -1n],
+            );
+            contributorSchedule = await tokenVesting.getVestingSchedule(
+                contributorScheduleId,
+            );
+            expect(contributorSchedule.released).to.equal(
+                parseEther(
+                    (
+                        (CONFIG.CORE_CONTRIBUTOR.AMOUNT /
+                            CONFIG.CORE_CONTRIBUTOR.SLICES) *
+                        3
+                    ).toString(),
+                ),
+            );
+
+            // Revoke in release period
+            const treasuryScheduleId = await tokenVesting.getVestingIdAtIndex(
+                2,
+            );
+
+            await expect(() =>
+                tokenVesting.connect(owner).revoke(treasuryScheduleId),
+            ).to.changeTokenBalances(
+                token,
+                [treasuryBeneficiary],
+                [
+                    parseEther(
+                        (
+                            (CONFIG.TREASURY.AMOUNT / CONFIG.TREASURY.SLICES) *
+                            3
+                        ).toString(),
+                    ),
+                ],
+            );
+
+            const freeAmount = parseEther(
+                (
+                    (CONFIG.TREASURY.AMOUNT / CONFIG.TREASURY.SLICES) *
+                    9
+                ).toString(),
+            );
+            // withdraw
+            await expect(() =>
+                tokenVesting.withdraw(freeAmount),
+            ).to.changeTokenBalances(
+                token,
+                [owner, tokenVesting],
+                [freeAmount, freeAmount * -1n],
+            );
+
+            // Release at the last month
+            await time.increaseTo(CONFIG.START_TIME + CONFIG.MONTH * 18);
+            releaseAmount = parseEther(
+                (
+                    (CONFIG.CORE_CONTRIBUTOR.AMOUNT /
+                        CONFIG.CORE_CONTRIBUTOR.SLICES) *
+                    9
+                ).toString(),
+            );
+
+            expect(
+                await tokenVesting.computeReleasableAmount(
+                    contributorScheduleId,
+                ),
+            ).to.equal(releaseAmount);
+            await expect(() =>
+                tokenVesting.connect(coreContributorsBeneficiary).release(
+                    contributorScheduleId, // Liquidity
+                    releaseAmount,
+                ),
+            ).to.changeTokenBalances(
+                token,
+                [coreContributorsBeneficiary, tokenVesting],
+                [releaseAmount, releaseAmount * -1n],
+            );
+            contributorSchedule = await tokenVesting.getVestingSchedule(
+                contributorScheduleId,
+            );
+            expect(contributorSchedule.released).to.equal(
+                parseEther(CONFIG.CORE_CONTRIBUTOR.AMOUNT.toString()),
+            );
+
+            // Release after the last month
+            await time.increaseTo(CONFIG.START_TIME + 20 * CONFIG.MONTH);
+            expect(
+                await tokenVesting.computeReleasableAmount(
+                    contributorScheduleId,
+                ),
+            ).to.equal(0);
+        });
+    });
+
     describe("Withdraw mistaken transfer tokens", () => {
         let tokenMistake: Token;
         beforeEach(async () => {
